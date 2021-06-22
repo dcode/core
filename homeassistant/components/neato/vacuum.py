@@ -24,7 +24,7 @@ from homeassistant.components.vacuum import (
     SUPPORT_STOP,
     StateVacuumEntity,
 )
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_MODE
+from homeassistant.const import ATTR_MODE
 from homeassistant.helpers import config_validation as cv, entity_platform
 
 from .const import (
@@ -87,13 +87,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     _LOGGER.debug("Adding vacuums %s", dev)
     async_add_entities(dev, True)
 
-    platform = entity_platform.current_platform.get()
+    platform = entity_platform.async_get_current_platform()
     assert platform is not None
 
     platform.async_register_entity_service(
         "custom_cleaning",
         {
-            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
             vol.Optional(ATTR_MODE, default=2): cv.positive_int,
             vol.Optional(ATTR_NAVIGATION, default=1): cv.positive_int,
             vol.Optional(ATTR_CATEGORY, default=4): cv.positive_int,
@@ -109,7 +108,7 @@ class NeatoConnectedVacuum(StateVacuumEntity):
     def __init__(self, neato, robot, mapdata, persistent_maps):
         """Initialize the Neato Connected Vacuum."""
         self.robot = robot
-        self._available = neato.logged_in if neato is not None else False
+        self._available = neato is not None
         self._mapdata = mapdata
         self._name = f"{self.robot.name}"
         self._robot_has_map = self.robot.has_persistent_maps
@@ -203,8 +202,8 @@ class NeatoConnectedVacuum(StateVacuumEntity):
             return
 
         mapdata = self._mapdata[self._robot_serial]["maps"][0]
-        self._clean_time_start = (mapdata["start_at"].strip("Z")).replace("T", " ")
-        self._clean_time_stop = (mapdata["end_at"].strip("Z")).replace("T", " ")
+        self._clean_time_start = mapdata["start_at"]
+        self._clean_time_stop = mapdata["end_at"]
         self._clean_area = mapdata["cleaned_area"]
         self._clean_susp_charge_count = mapdata["suspended_cleaning_charging_count"]
         self._clean_susp_time = mapdata["time_in_suspended_cleaning"]
@@ -285,7 +284,7 @@ class NeatoConnectedVacuum(StateVacuumEntity):
         return self._robot_serial
 
     @property
-    def device_state_attributes(self):
+    def extra_state_attributes(self):
         """Return the state attributes of the vacuum cleaner."""
         data = {}
 
@@ -396,6 +395,7 @@ class NeatoConnectedVacuum(StateVacuumEntity):
                     "Zone '%s' was not found for the robot '%s'", zone, self.entity_id
                 )
                 return
+            _LOGGER.info("Start cleaning zone '%s' with robot %s", zone, self.entity_id)
 
         self._clean_state = STATE_CLEANING
         try:

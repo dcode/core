@@ -3,10 +3,11 @@
   "name": "Lutron",
   "documentation": "https://www.home-assistant.io/integrations/lutron",
   "requirements": [
-    "pylutron==0.2.5"
+    "pylutron==0.2.7"
   ],
   "codeowners": [
     "@JonGilmore"
   ],
+  "iot_class": "local_polling",
   "version": "0.0.1"
 }

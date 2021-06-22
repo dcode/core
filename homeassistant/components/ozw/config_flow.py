@@ -7,8 +7,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
 
-from .const import CONF_INTEGRATION_CREATED_ADDON, CONF_USE_ADDON
-from .const import DOMAIN  # pylint:disable=unused-import
+from .const import CONF_INTEGRATION_CREATED_ADDON, CONF_USE_ADDON, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +24,6 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for ozw."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
         """Set up flow instance."""
@@ -36,6 +34,15 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # If we install the add-on we should uninstall it on entry remove.
         self.integration_created_addon = False
         self.install_task = None
+
+    async def async_step_import(self, data):
+        """Handle imported data.
+
+        This step will be used when importing data during zwave to ozw migration.
+        """
+        self.network_key = data.get(CONF_NETWORK_KEY)
+        self.usb_path = data.get(CONF_USB_PATH)
+        return await self.async_step_user()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -58,17 +65,14 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        addon_config = await self._async_get_addon_config()
-        self.usb_path = addon_config[CONF_ADDON_DEVICE]
-        self.network_key = addon_config.get(CONF_ADDON_NETWORK_KEY, "")
-
         return await self.async_step_hassio_confirm()
 
     async def async_step_hassio_confirm(self, user_input=None):
         """Confirm the add-on discovery."""
         if user_input is not None:
-            self.use_addon = True
-            return self._async_create_entry_from_vars()
+            return await self.async_step_on_supervisor(
+                user_input={CONF_USE_ADDON: True}
+            )
 
         return self.async_show_form(step_id="hassio_confirm")
 
@@ -91,7 +95,11 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         This is the entry point for the logic that is needed
         when this integration will depend on the MQTT integration.
         """
-        if "mqtt" not in self.hass.config.components:
+        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+        if (
+            not mqtt_entries
+            or mqtt_entries[0].state is not config_entries.ConfigEntryState.LOADED
+        ):
             return self.async_abort(reason="mqtt_required")
         return self._async_create_entry_from_vars()
 
@@ -107,6 +115,9 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.use_addon = True
 
         if await self._async_is_addon_running():
+            addon_config = await self._async_get_addon_config()
+            self.usb_path = addon_config[CONF_ADDON_DEVICE]
+            self.network_key = addon_config.get(CONF_ADDON_NETWORK_KEY, "")
             return self._async_create_entry_from_vars()
 
         if await self._async_is_addon_installed():
@@ -147,9 +158,10 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.network_key = user_input[CONF_NETWORK_KEY]
             self.usb_path = user_input[CONF_USB_PATH]
 
-            new_addon_config = {CONF_ADDON_DEVICE: self.usb_path}
-            if self.network_key:
-                new_addon_config[CONF_ADDON_NETWORK_KEY] = self.network_key
+            new_addon_config = {
+                CONF_ADDON_DEVICE: self.usb_path,
+                CONF_ADDON_NETWORK_KEY: self.network_key,
+            }
 
             if new_addon_config != self.addon_config:
                 await self._async_set_addon_config(new_addon_config)
@@ -162,13 +174,15 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return self._async_create_entry_from_vars()
 
-        self.usb_path = self.addon_config.get(CONF_ADDON_DEVICE, "")
-        self.network_key = self.addon_config.get(CONF_ADDON_NETWORK_KEY, "")
+        usb_path = self.addon_config.get(CONF_ADDON_DEVICE, self.usb_path or "")
+        network_key = self.addon_config.get(
+            CONF_ADDON_NETWORK_KEY, self.network_key or ""
+        )
 
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_USB_PATH, default=self.usb_path): str,
-                vol.Optional(CONF_NETWORK_KEY, default=self.network_key): str,
+                vol.Required(CONF_USB_PATH, default=usb_path): str,
+                vol.Optional(CONF_NETWORK_KEY, default=network_key): str,
             }
         )
 
